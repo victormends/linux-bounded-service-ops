@@ -1,6 +1,6 @@
 # linux-bounded-service-ops
 
-A Python 3.11+ standard-library runtime (CI-verified on Ubuntu 3.11 and 3.12; stdlib-compatible with 3.9+) and operational toolkit for running a CPU-bound HTTP/SSE service on a single 4 GiB memory-constrained Linux host without external message brokers, database servers, or heavy monitoring agents.
+A Python 3.11+ standard-library runtime (CI-verified on Ubuntu 3.11 and 3.12) and operational toolkit for running a CPU-bound HTTP/SSE service on a single 4 GiB memory-constrained Linux host without external message brokers, database servers, or heavy monitoring agents.
 
 ---
 
@@ -17,7 +17,7 @@ Running CPU-bound workloads behind an HTTP API on a small VPS usually breaks in 
 
 ## Origin & Sanitization
 
-These modules were extracted and rewritten from a live single-host Linux service operated under burst traffic on constrained hardware. All proprietary domain computation, upstream third-party integrations, hostnames, IP addresses, and client references were removed and replaced by a deterministic synthetic CPU-bound digest workload and RFC 5737 synthetic access logs.
+These modules were extracted and rewritten from the live public production service **Monitoramento do Rio Iguaçu** (`https://rioiguacu.jornalocomercio.com`), which served as the operational origin for the `singleflight` coalescing, `systemd` hardening, Nginx caching, and bounded 4 GiB VPS patterns (`2.7M+` requests and a `43k req/hr` flood peak without recorded downtime). All proprietary hydrological models, private host infrastructure, upstream third-party integrations, hostnames, IP addresses, and client references remain private and were replaced here by a deterministic synthetic CPU-bound digest workload and RFC 5737 synthetic access logs.
 
 ## What It Intentionally Does Not Do
 
@@ -101,7 +101,7 @@ Out-of-Band Systemd Timers & Maintenance (isolated memory/CPU budgets)
 
 ## Local Quickstart (Zero External Dependencies)
 
-Requires **Python 3.11+** (CI-verified on Ubuntu 3.11 and 3.12; stdlib-compatible with 3.9+, `pytest` for running the test suite).
+Requires **Python 3.11+** (CI-verified on Ubuntu 3.11 and 3.12, `pytest` for running the test suite).
 
 ```bash
 pytest -v
