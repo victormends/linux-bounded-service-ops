@@ -1,0 +1,19 @@
+[Unit]
+Description=Check Bounded Ops Gateway health, cgroup v2 memory, and storage
+
+[Service]
+Type=oneshot
+User=svcuser
+Group=svcuser
+WorkingDirectory=/opt/bounded-ops/current
+EnvironmentFile=/etc/bounded-ops/service.env
+ExecStart=/opt/bounded-ops/venv/bin/python -m bounded_ops.ops.healthcheck --url http://127.0.0.1:8765/api/v1/health --cgroup /sys/fs/cgroup/system.slice/bounded-ops-gateway.service --backup-status /var/lib/bounded-ops/last_verified_backup.json --alert-state /var/lib/bounded-ops/healthcheck_alert_state.json
+Nice=15
+CPUQuota=10%
+MemoryMax=96M
+TimeoutStartSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bounded-ops

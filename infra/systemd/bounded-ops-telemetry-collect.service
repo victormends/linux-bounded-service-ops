@@ -1,0 +1,24 @@
+[Unit]
+Description=Aggregate Nginx JSON logs into closed-cardinality 5-minute cubes
+
+[Service]
+Type=oneshot
+User=svcuser
+Group=svcuser
+WorkingDirectory=/opt/bounded-ops/current
+ExecStart=/opt/bounded-ops/venv/bin/python -m bounded_ops.telemetry.collector --log-dir /var/log/nginx --output /var/lib/bounded-ops-telemetry/report.json
+TimeoutStartSec=240
+Nice=15
+IOSchedulingClass=idle
+CPUQuota=20%
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/bounded-ops-telemetry
+UMask=0027

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linux-bounded-service-ops"
+version = "0.1.0"
+description = "Resource-bounded HTTP/SSE compute gateway and Linux operational tooling for small memory-constrained hosts."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+bounded-ops-gateway = "bounded_ops.gateway.server:main"
+bounded-ops-healthcheck = "bounded_ops.ops.healthcheck:main"
+bounded-ops-backup = "bounded_ops.ops.sqlite_gfs_backup:main"
+bounded-ops-prune = "bounded_ops.ops.release_pruner:main"
+bounded-ops-secrets = "bounded_ops.ops.secret_scanner:main"
+bounded-ops-telemetry = "bounded_ops.telemetry.collector:main"
+bounded-ops-dashboard = "bounded_ops.telemetry.ops_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-v"

@@ -1,0 +1,34 @@
+[Unit]
+Description=Bounded Ops HTTP/SSE Compute Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=svcuser
+Group=svcuser
+WorkingDirectory=/opt/bounded-ops/current
+EnvironmentFile=/etc/bounded-ops/service.env
+ExecStart=/opt/bounded-ops/venv/bin/python -m bounded_ops.gateway.server --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+# Tune for a 4 GiB Linux VPS: apply cgroup v2 reclaim pressure before OOM.
+MemoryHigh=1500M
+MemoryMax=2500M
+MemorySwapMax=1024M
+TasksMax=256
+LimitNOFILE=4096
+CPUWeight=80
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/bounded-ops /var/cache/bounded-ops
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

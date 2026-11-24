@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Bounded Ops healthcheck every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=bounded-ops-healthcheck.service
+
+[Install]
+WantedBy=timers.target

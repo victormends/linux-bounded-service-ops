@@ -1,0 +1,16 @@
+[Unit]
+Description=Create and verify Bounded Ops SQLite GFS backup
+
+[Service]
+Type=oneshot
+User=svcuser
+Group=svcuser
+WorkingDirectory=/opt/bounded-ops/current
+EnvironmentFile=/etc/bounded-ops/service.env
+ExecStart=/opt/bounded-ops/venv/bin/python -m bounded_ops.ops.sqlite_gfs_backup backup --database /var/lib/bounded-ops/state.sqlite --output-dir /var/backups/bounded-ops --status-file /var/lib/bounded-ops/last_verified_backup.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bounded-ops /var/backups/bounded-ops
+UMask=0077

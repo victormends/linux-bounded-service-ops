@@ -1,0 +1,25 @@
+[Unit]
+Description=Private telemetry dashboard (SSH loopback only)
+After=network.target
+
+[Service]
+User=svcuser
+Group=svcuser
+WorkingDirectory=/opt/bounded-ops/current
+ExecStart=/opt/bounded-ops/venv/bin/python -m bounded_ops.telemetry.ops_server --report /var/lib/bounded-ops-telemetry/report.json --port 8766
+Restart=on-failure
+MemoryMax=96M
+CPUQuota=15%
+TasksMax=32
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

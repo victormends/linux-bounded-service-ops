@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily verified SQLite GFS backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=bounded-ops-backup.service
+
+[Install]
+WantedBy=timers.target
