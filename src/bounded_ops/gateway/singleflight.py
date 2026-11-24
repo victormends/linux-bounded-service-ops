@@ -428,6 +428,7 @@ class SingleFlightCoordinator:
 
         self._notify()
         disconnected = False
+        timed_out = False
         deadline = time.monotonic() + effective_timeout
         try:
             while True:
@@ -449,6 +450,7 @@ class SingleFlightCoordinator:
                         continue
                     raise JobTimeoutError("Compute job timed out")
         except (FuturesTimeoutError, TimeoutError):
+            timed_out = True
             with self._lock:
                 self._metrics["timed_out"] += 1
                 self._kind_bucket(job_kind)["timed_out"] += 1
@@ -461,10 +463,10 @@ class SingleFlightCoordinator:
                     self._waiters[key] = remaining_waiters
                 else:
                     self._waiters.pop(key, None)
-                    if disconnected and not future.done() and future.cancel():
+                    if (disconnected or timed_out) and not future.done() and future.cancel():
                         self._metrics["cancelled"] += 1
                         self._kind_bucket(job_kind)["cancelled"] += 1
-            if disconnected:
+            if disconnected or timed_out:
                 self._notify()
 
     def status(self) -> Dict[str, Any]:

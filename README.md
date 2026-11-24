@@ -89,10 +89,11 @@ Out-of-Band Systemd Timers & Maintenance (isolated memory/CPU budgets)
 
 Requires **Python 3.9+** (`pytest` for running the test suite).
 
-### 1. Run the test suite and secret scanner
+### 1. Run the test suite, burst benchmark, and secret scanner
 
 ```bash
 pytest -v
+PYTHONPATH=src python scripts/benchmark_singleflight.py
 PYTHONPATH=src python -m bounded_ops.ops.secret_scanner --git-history
 ```
 
@@ -100,6 +101,7 @@ On Windows PowerShell 5.1 (`pytest.ini` configures `pythonpath = src`):
 
 ```powershell
 pytest -v
+$env:PYTHONPATH = "src"; python scripts/benchmark_singleflight.py
 $env:PYTHONPATH = "src"; python -m bounded_ops.ops.secret_scanner --git-history
 ```
 

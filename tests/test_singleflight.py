@@ -285,3 +285,47 @@ def test_dual_lru_result_and_encoded_body_caches() -> None:
     stats = body_cache.stats()
     assert stats["entries"] == 2
     assert stats["evictions"] == 1
+
+
+def test_timeout_cancels_queued_future_when_last_waiter_expires() -> None:
+    worker_busy = threading.Event()
+    release_worker = threading.Event()
+
+    def hold_worker() -> str:
+        worker_busy.set()
+        release_worker.wait(timeout=5)
+        return "held"
+
+    def queued_work() -> str:
+        return "should-not-run"
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        coord = SingleFlightCoordinator(
+            interactive_executor=pool,
+            background_executor=pool,
+            max_inflight=4,
+            interactive_max_inflight=4,
+            background_max_inflight=4,
+            poll_interval_seconds=0.01,
+        )
+        with ThreadPoolExecutor(max_workers=2) as callers:
+            holder = callers.submit(
+                coord.execute, hold_worker, lane="background", coalesce_key=("hold-to",)
+            )
+            assert worker_busy.wait(timeout=2)
+
+            with pytest.raises(JobTimeoutError):
+                coord.execute(
+                    queued_work,
+                    lane="background",
+                    coalesce_key=("queued-to",),
+                    timeout_seconds=0.05,
+                )
+
+            release_worker.set()
+            assert holder.result(timeout=5) == "held"
+
+    status = coord.status()
+    assert status["timed_out"] == 1
+    assert status["cancelled"] == 1
+
