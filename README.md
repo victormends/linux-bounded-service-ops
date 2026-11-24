@@ -1,6 +1,35 @@
 # linux-bounded-service-ops
 
-Production-oriented Python 3.9+ standard-library toolkit for operating a CPU-bound HTTP/SSE service on a **4 GiB memory-constrained Linux host** without external message brokers, database servers, or third-party monitoring agents.
+A Python 3.9+ standard-library runtime and operational toolkit for running a CPU-bound HTTP/SSE service on a single 4 GiB memory-constrained Linux host without external message brokers, database servers, or heavy monitoring agents.
+
+---
+
+## Why This Exists
+
+Running CPU-bound workloads behind an HTTP API on a small VPS usually breaks in five predictable ways:
+
+1. Heavy compute inside the web process hits the GIL, starves health/SSE connections, and pushes RSS past cgroup limits under traffic spikes.
+2. Duplicate concurrent requests trigger redundant worker runs unless inflight futures are coalesced and bounded by lane and waiter caps.
+3. Copying a live SQLite database leaves torn WAL pages, while blind timer cleanup (`rm -rf`) deletes releases still referenced by systemd units or `/proc/<pid>`.
+4. Nginx query-string logging leaks user search terms and raw IP addresses to disk.
+
+`linux-bounded-service-ops` isolates heavy compute into dual-lane `ProcessPoolExecutor("spawn")` pools with singleflight coalescing, pairs it with stdlib cgroup v2 / `st_dev` healthchecks, online GFS SQLite backups, a manual two-phase release pruner, and privacy-preserving 5-minute telemetry cubes.
+
+## Origin & Sanitization
+
+These modules were extracted and rewritten from a live single-host Linux service operated under burst traffic on constrained hardware. All proprietary domain computation, upstream third-party integrations, hostnames, IP addresses, and client references were removed and replaced by a deterministic synthetic CPU-bound digest workload and RFC 5737 synthetic access logs.
+
+## What It Intentionally Does Not Do
+
+This toolkit is scoped specifically to a single-host Linux + systemd + Nginx deployment.
+
+It does **not**:
+
+- orchestrate multi-node clusters or replace Kubernetes, Prometheus, or Grafana
+- preempt an already-executing Python worker process mid-computation without killing the child process (timeout/disconnect cancellation drops queued futures once waiters reach zero)
+- delete old releases automatically on a timer (storage pruning is intentionally manual and gated by a SHA-256 verification digest)
+
+---
 
 ## System Architecture (4 GiB Host Budget)
 
@@ -42,36 +71,21 @@ Out-of-Band Systemd Timers & Maintenance (isolated memory/CPU budgets)
   +-- manual two-phase release_pruner ------> dry-run plan SHA-256 + /proc/<pid> check + fsync JSONL
 ```
 
-## Engineering Decisions and Real Tradeoffs
+## Engineering Tradeoffs
 
-1. **Dual-lane `spawn` process pools instead of threads or single shared queue**
-   - CPU-bound work inside a single Python process hits the GIL and degrades HTTP/SSE responsiveness. Isolating compute into `ProcessPoolExecutor("spawn")` keeps the gateway lightweight and lets `interactive` requests bypass a saturated `background` lane.
-   - *Tradeoff:* Python's `Future.cancel()` can drop a *queued* future once `waiters == 0` and the downstream socket closes, freeing capacity for the queue, but it cannot preempt a worker already mid-execution without terminating the child process. Bounding `iterations`, `payload_bytes`, and `job_timeout_seconds` prevents runaway jobs.
-
-2. **Singleflight coalescing with waiter caps and dual LRU caches**
-   - Identical concurrent requests coalesce onto one `Future` after argument normalization (`freeze_argument`), preventing duplicate worker execution on bursty refreshes. Waiter caps (`max_waiters`, `max_waiters_per_job`) shed load with `503 Retry-After: 2` before threads pile up past `TasksMax=256`.
-   - *Tradeoff:* Two small LRU caches (decoded objects in `SingleFlightCoordinator` and pre-gzipped bytes + ETags in `EncodedBodyCache`) double-cache hot payloads in exchange for eliminating repeated JSON serialization and gzip compression overhead on burst reads. Cache sizes remain strictly capped (`8` and `12` entries by default).
-
-3. **Cgroup v2 accounting + `st_dev` deduplication + alert hysteresis**
-   - Reading `memory.current` and `memory.events` (`oom`, `oom_kill`) inside the service cgroup catches container/unit memory pressure before host-wide swap exhaustion. Filesystem checks deduplicate by `st_dev` so multiple directories on the same block device are measured once. Cache walks reject symlinks/junctions and special files without mutating files.
-   - *Tradeoff:* Alert hysteresis suppresses repeated failure webhooks until `reminder_seconds` elapses (while firing immediately on healthy-to-failing and failing-to-healthy transitions), meaning transient sub-interval blips between timer ticks are intentionally unobserved.
-
-4. **Online `sqlite3.Connection.backup()` + GFS rotation + traversal-safe restore**
-   - File-copying a live SQLite database risks torn WAL pages. `sqlite3.Connection.backup()` produces a consistent snapshot verified immediately with `PRAGMA integrity_check`, wrapped with a SHA-256 `manifest.json`, and pruned under Grandfather-Father-Son retention (7 daily, 4 weekly, 6 monthly). Restore requires an empty directory and rejects symlinks, hardlinks, device nodes, `..` traversal, or backslash paths before extracting.
-
-5. **Two-phase SHA-256 release pruner (manual only)**
-   - Storage cleanup never runs on a timer. Phase 1 inspects release directories (forbidding symlinks, mount crossings, hardlinks, and persistent `.sqlite`/`.env`/`.pem` files) plus `/proc/<pid>` (`cwd`, `exe`, `fd/*`, `maps`, `environ`, `cmdline`) and config roots, writing an immutable JSON plan. Phase 2 requires the exact `--apply-sha256`, re-validates every kept and target inventory, preserves `release-manifest.json`, and calls `os.fsync()` before and after each deletion in an append-only `.applied.jsonl` log.
-
-6. **Closed-cardinality 5-minute telemetry cubes without raw PII**
-   - Nginx writes JSON access logs using `$uri` (never `$request_uri`). The aggregator discards query strings, raw IPs, and raw User-Agents, folding counts and sparse latency histograms into allowlisted `(time_bucket, endpoint, device, traffic, status)` cubes capped at 40,000 rows over 7 days.
-   - *Tradeoff:* P50/P95/P99 latencies computed by summing sparse bucket histograms are upper-bound approximations of the fixed bucket edges, and per-hour `unique_ip_estimate` values cannot be summed across hours. The private dashboard binds exclusively to `127.0.0.1` and enforces `Host`, `Sec-Fetch-Site`, and `Origin` checks.
+1. **Dual-lane `spawn` pools instead of threads or one shared queue:** CPU-bound work inside a single Python process hits the GIL and stalls HTTP/SSE reads. Separating `interactive` and `background` lanes prevents batch saturation from blocking interactive calls, trading worker preemption for hard `iterations`, `payload_bytes`, and `job_timeout_seconds` limits.
+2. **Singleflight coalescing with dual LRU caches:** Caching both decoded objects (`result_cache_max=8`) and pre-gzipped bytes (`body_cache_max=12`) avoids repeated JSON encoding and gzip passes during burst refreshes at the cost of small bounded memory duplication.
+3. **Cgroup v2 accounting + `st_dev` deduplication + hysteresis:** Reading `memory.current` and `memory.events` (`oom`, `oom_kill`) flags unit pressure before host swap exhaustion. Alert hysteresis fires immediately on state transitions and suppresses repeat failure pages until `reminder_seconds` elapses, meaning brief sub-interval recovery blips between timer ticks go unpaged.
+4. **Online `sqlite3.Connection.backup()` + GFS rotation + safe restore:** Uses SQLite's online backup API + `PRAGMA integrity_check` + SHA-256 manifests and enforces empty-directory restores that reject symlinks, hardlinks, device nodes, or `..` traversal.
+5. **Two-phase SHA-256 release pruner:** Scans `/proc/<pid>` (`cwd`, `exe`, `fd/*`, `maps`, `environ`, `cmdline`) and config roots before emitting an immutable plan JSON, then requires `--apply-sha256` and `os.fsync()` audit logging before deleting anything.
+6. **Closed-cardinality 5-minute telemetry cubes:** Logs `$uri` without `$args`, drops raw IPs and User-Agents, and tracks sparse latency histograms capped at 40,000 rows over 7 days. P50/P95/P99 values represent upper-bound approximations at fixed bucket edges.
 
 ## Repository Layout
 
 | Path | Responsibility |
 | :--- | :--- |
 | `src/bounded_ops/gateway/worker.py` | Picklable `compute_grid_digest` workload for `spawn` process pools |
-| `src/bounded_ops/gateway/singleflight.py` | Dual-lane `BoundedSemaphore` admission, coalescing, disconnect cancellation, dual LRU |
+| `src/bounded_ops/gateway/singleflight.py` | Dual-lane `BoundedSemaphore` admission, coalescing, disconnect/timeout cancellation, dual LRU |
 | `src/bounded_ops/gateway/sse_hub.py` | Thread-safe SSE broadcast hub with monotonic snapshots and heartbeats |
 | `src/bounded_ops/gateway/server.py` | `ThreadingHTTPServer` gateway (`/compute`, `/health`, `/ready`, `/metrics`, `/stream`) |
 | `src/bounded_ops/ops/healthcheck.py` | `/proc/meminfo`, cgroup v2 `memory.current`/`memory.events`, `st_dev` dedup, hysteresis |
@@ -81,23 +95,13 @@ Out-of-Band Systemd Timers & Maintenance (isolated memory/CPU budgets)
 | `src/bounded_ops/telemetry/collector.py` | Closed-cardinality 5-minute cube aggregator and fixed-bucket percentiles |
 | `src/bounded_ops/telemetry/ops_server.py` | Loopback-only telemetry API (`Host` allowlist + anti-CSRF headers) |
 | `scripts/generate_synthetic_logs.py` | Synthetic Nginx JSON log generator (RFC 5737 addresses only) |
+| `scripts/benchmark_singleflight.py` | Local 20-caller burst coalescing and dual-lane saturation benchmark |
 | `infra/systemd/*.service`, `*.timer` | Hardened systemd units and timers tuned for a 4 GiB VPS |
 | `infra/nginx/*.conf` | Reverse proxy timeouts, SSE buffering rules, rate limits, security headers |
-| `tests/` | Unit and integration test suites across all subsystems |
 
 ## Local Quickstart (Zero External Dependencies)
 
 Requires **Python 3.9+** (`pytest` for running the test suite).
-
-### 1. Run the test suite, burst benchmark, and secret scanner
-
-```bash
-pytest -v
-PYTHONPATH=src python scripts/benchmark_singleflight.py
-PYTHONPATH=src python -m bounded_ops.ops.secret_scanner --git-history
-```
-
-On Windows PowerShell 5.1 (`pytest.ini` configures `pythonpath = src`):
 
 ```powershell
 pytest -v
@@ -105,7 +109,7 @@ $env:PYTHONPATH = "src"; python scripts/benchmark_singleflight.py
 $env:PYTHONPATH = "src"; python -m bounded_ops.ops.secret_scanner --git-history
 ```
 
-### 2. Run the HTTP/SSE gateway locally
+Start the HTTP/SSE gateway locally:
 
 ```powershell
 $env:PYTHONPATH = "src"
@@ -122,7 +126,7 @@ curl.exe -s "http://127.0.0.1:8765/api/v1/metrics?format=prometheus"
 curl.exe -N "http://127.0.0.1:8765/api/v1/stream"
 ```
 
-### 3. Generate synthetic logs, aggregate cubes, and query the loopback dashboard
+Generate synthetic logs, aggregate cubes, and query the loopback dashboard:
 
 ```powershell
 $env:PYTHONPATH = "src"
@@ -131,8 +135,6 @@ python -m bounded_ops.telemetry.collector --log-dir .\tmp-logs --output .\tmp-lo
 python -m bounded_ops.telemetry.ops_server --report .\tmp-logs\report.json --port 8766
 ```
 
-Query `http://127.0.0.1:8766/summary` or `http://127.0.0.1:8766/report.json` over loopback.
-
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
