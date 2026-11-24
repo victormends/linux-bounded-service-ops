@@ -42,6 +42,6 @@ jobs:
       - name: Smoke test synthetic telemetry aggregator
         run: |
           mkdir -p /tmp/bounded-ops-smoke
-          python scripts/generate_synthetic_logs.py --output /tmp/bounded-ops-smoke/access.log --count 250 --hours 2
+          python scripts/generate_synthetic_logs.py --output /tmp/bounded-ops-smoke/bounded-ops-access.log --count 250 --hours 2
           python -m bounded_ops.telemetry.collector --log-dir /tmp/bounded-ops-smoke --output /tmp/bounded-ops-smoke/report.json
           test -s /tmp/bounded-ops-smoke/report.json
