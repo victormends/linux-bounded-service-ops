@@ -1,12 +1,12 @@
 # linux-bounded-service-ops
 
-A Python 3.9+ standard-library runtime and operational toolkit for running a CPU-bound HTTP/SSE service on a single 4 GiB memory-constrained Linux host without external message brokers, database servers, or heavy monitoring agents.
+A Python 3.11+ standard-library runtime (CI-verified on Ubuntu 3.11 and 3.12; stdlib-compatible with 3.9+) and operational toolkit for running a CPU-bound HTTP/SSE service on a single 4 GiB memory-constrained Linux host without external message brokers, database servers, or heavy monitoring agents.
 
 ---
 
 ## Why This Exists
 
-Running CPU-bound workloads behind an HTTP API on a small VPS usually breaks in five predictable ways:
+Running CPU-bound workloads behind an HTTP API on a small VPS usually breaks in four predictable ways:
 
 1. Heavy compute inside the web process hits the GIL, starves health/SSE connections, and pushes RSS past cgroup limits under traffic spikes.
 2. Duplicate concurrent requests trigger redundant worker runs unless inflight futures are coalesced and bounded by lane and waiter caps.
@@ -101,39 +101,50 @@ Out-of-Band Systemd Timers & Maintenance (isolated memory/CPU budgets)
 
 ## Local Quickstart (Zero External Dependencies)
 
-Requires **Python 3.9+** (`pytest` for running the test suite).
+Requires **Python 3.11+** (CI-verified on Ubuntu 3.11 and 3.12; stdlib-compatible with 3.9+, `pytest` for running the test suite).
 
-```powershell
+```bash
 pytest -v
-$env:PYTHONPATH = "src"; python scripts/benchmark_singleflight.py
-$env:PYTHONPATH = "src"; python -m bounded_ops.ops.secret_scanner --git-history
+PYTHONPATH=src python scripts/benchmark_singleflight.py
+PYTHONPATH=src python -m bounded_ops.ops.secret_scanner --git-history
 ```
 
 Start the HTTP/SSE gateway locally:
 
-```powershell
-$env:PYTHONPATH = "src"
-python -m bounded_ops.gateway.server --host 127.0.0.1 --port 8765
+```bash
+PYTHONPATH=src python -m bounded_ops.gateway.server --host 127.0.0.1 --port 8765
 ```
 
 Probe endpoints in another terminal:
 
-```powershell
-curl.exe -s "http://127.0.0.1:8765/api/v1/compute?tile_id=grid-a&iterations=2500&payload_bytes=4096&lane=interactive"
-curl.exe -s "http://127.0.0.1:8765/api/v1/health"
-curl.exe -s "http://127.0.0.1:8765/api/v1/ready"
-curl.exe -s "http://127.0.0.1:8765/api/v1/metrics?format=prometheus"
-curl.exe -N "http://127.0.0.1:8765/api/v1/stream"
+```bash
+curl -s "http://127.0.0.1:8765/api/v1/compute?tile_id=grid-a&iterations=2500&payload_bytes=4096&lane=interactive"
+curl -s "http://127.0.0.1:8765/api/v1/health"
+curl -s "http://127.0.0.1:8765/api/v1/ready"
+curl -s "http://127.0.0.1:8765/api/v1/metrics?format=prometheus"
+curl -N "http://127.0.0.1:8765/api/v1/stream"
 ```
 
 Generate synthetic logs, aggregate cubes, and query the loopback dashboard:
 
-```powershell
-$env:PYTHONPATH = "src"
-python scripts/generate_synthetic_logs.py --output .\tmp-logs\bounded-ops-access.log --count 500 --hours 4
-python -m bounded_ops.telemetry.collector --log-dir .\tmp-logs --output .\tmp-logs\report.json
-python -m bounded_ops.telemetry.ops_server --report .\tmp-logs\report.json --port 8766
+```bash
+PYTHONPATH=src python scripts/generate_synthetic_logs.py --output ./tmp-logs/bounded-ops-access.log --count 500 --hours 4
+PYTHONPATH=src python -m bounded_ops.telemetry.collector --log-dir ./tmp-logs --output ./tmp-logs/report.json
+PYTHONPATH=src python -m bounded_ops.telemetry.ops_server --report ./tmp-logs/report.json --port 8766
 ```
+
+## Measured Singleflight Benchmark
+
+Output from `PYTHONPATH=src python scripts/benchmark_singleflight.py` (`20` concurrent identical callers synchronized behind a `threading.Barrier` followed by background saturation + interactive bypass):
+
+| Metric | Measured Value | Behavior Verified |
+| :--- | :--- | :--- |
+| Concurrent Identical Callers | `20` | Barrier-released burst on `background` lane |
+| Worker Executions Submitted | `1` | Singleflight coalescing collapsed 20 callers to 1 run |
+| Joined In-Flight + Cache Hits | `19` joined + `0` cache hits | All 19 followers received identical digest (`1` completed) |
+| Coalesce Window Elapsed | `593.66 ms` | Wall-clock time for all 20 callers to resolve |
+| Saturated Background Rejection | `true` (`ServiceBusyError`) | 2nd concurrent job rejected when `background_max_inflight=1` |
+| Interactive Lane Bypass | `digest=211a96786416d38d` | `interactive` lane executed while `background` lane was saturated |
 
 ## License
 
